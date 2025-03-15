@@ -3,7 +3,9 @@ from torch.optim import Optimizer
 import numpy as np
 
 class NoisySGD(Optimizer):
-    def __init__(self, params, lr=0.01, momentum=0, dampening=0, weight_decay=0, noise_std=0.01):
+    def __init__(self, params, lr=0.01, momentum=0, dampening=0, weight_decay=0, noise_std=0):
+        """Equiv SGD with zero parameters"""
+        
         if lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -12,6 +14,7 @@ class NoisySGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if noise_std < 0.0:
             raise ValueError("Invalid noise_std value: {}".format(noise_std))
+        
         
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay, noise_std=noise_std)
         super(NoisySGD, self).__init__(params, defaults)
@@ -47,8 +50,9 @@ class NoisySGD(Optimizer):
                     d_p = buf
                 
                 # Добавляем шум
-                noise = torch.randn_like(d_p) * noise_std
-                d_p.add_(noise)
+                if noise_std != 0:
+                    noise = torch.randn_like(d_p) * noise_std
+                    d_p.add_(noise)
                 
                 p.data.add_(-lr, d_p)
                 
