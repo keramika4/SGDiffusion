@@ -18,3 +18,5 @@ python scripts/run.py
 python scripts/train_CNN_CIFAR.py
 ```
 
+### TODO:
+1) Добавить конфиги для автоматизации экспериментов
