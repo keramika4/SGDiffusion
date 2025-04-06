@@ -14,10 +14,10 @@ from src.optimizer import NoisySGD
 
 import torch.nn as nn
 
-DEVICE = 'mps'
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Папка для сохранения моделей
-CHECKPOINT_DIR = "data/checkpoints/exp1"
+CHECKPOINT_DIR = "data/checkpoints/exp2"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 # Гиперпараметры

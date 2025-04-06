@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import math
 
 class CNN(nn.Module):
     def __init__(self, k=1):
@@ -75,6 +76,75 @@ class MLP(nn.Module):
     def forward(self, x):
         x = x.view(x.size(0), -1)  # Flatten input
         return self.network(x)
+
+
+class PeriodicEmbeddings(nn.Module):
+    def __init__(self, d_in, d_embedding, n_frequencies=16, frequency_init_scale=1.0):
+        super().__init__()
+        self.frequencies = nn.Parameter(
+            frequency_init_scale * torch.randn(d_in, n_frequencies)
+        )
+        self.linear = nn.Linear(d_in * 2 * n_frequencies, d_embedding)
+
+    def forward(self, x):
+        x_proj = 2 * math.pi * x.unsqueeze(-1) * self.frequencies
+        x_pe = torch.cat([x_proj.sin(), x_proj.cos()], dim=-1)
+        return self.linear(x_pe.view(x.size(0), -1))
+
+
+def make_mlp(in_dim, out_dim, hidden_dim, num_layers, activation='ReLU', dropout=0.0):
+    act_layer = getattr(nn, activation)
+    layers = [nn.Linear(in_dim, hidden_dim), act_layer(), nn.Dropout(dropout)]
+    for _ in range(num_layers):
+        layers += [nn.Linear(hidden_dim, hidden_dim), act_layer(), nn.Dropout(dropout)]
+    layers.append(nn.Linear(hidden_dim, out_dim))
+    return nn.Sequential(*layers)
+
+
+class MLP_PLR(nn.Module):
+    def __init__(
+        self,
+        input_size=28 * 28,
+        num_classes=10,
+        hidden_dim=128,
+        num_layers=2,
+        embedding_type='periodic',
+        d_embedding=128,
+        n_frequencies=32,
+        frequency_init_scale=1.0,
+        activation='ReLU',
+        dropout=0.0,
+    ):
+        super().__init__()
+
+        if embedding_type == 'periodic':
+            self.embedding = PeriodicEmbeddings(
+                d_in=input_size,
+                d_embedding=d_embedding,
+                n_frequencies=n_frequencies,
+                frequency_init_scale=frequency_init_scale,
+            )
+            embedding_out_dim = d_embedding
+        elif embedding_type == 'none':
+            self.embedding = nn.Identity()
+            embedding_out_dim = input_size
+        else:
+            raise ValueError(f"Unknown embedding_type: {embedding_type}")
+
+        self.network = make_mlp(
+            in_dim=embedding_out_dim,
+            out_dim=num_classes,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            activation=activation,
+            dropout=dropout,
+        )
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        x = self.embedding(x)
+        return self.network(x)
+
 
 
 class CNNLayerNorm(nn.Module):
