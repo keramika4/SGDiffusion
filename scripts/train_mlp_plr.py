@@ -20,7 +20,7 @@ CHECKPOINT_DIR = "data/checkpoints/exp_mlp_plr"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 # Гиперпараметры
-num_epochs = 100
+num_epochs = 10
 learning_rate = 0.01
 batch_size = 64
 
@@ -68,11 +68,30 @@ for epoch in range(num_epochs):
 
         # Логгирование весов PeriodicEmbeddings после каждого шага
         with torch.no_grad():
-            for name, param in model.named_parameters():
-                if 'frequencies' in name:
-                    LOGGER.update("frequencies", param.detach().cpu().numpy().copy())
-    print(f'Loss: {loss.item()} ')
 
+            for name, param in model.named_parameters():
+                if 'embedding' in name:
+                    LOGGER.update(f"{name}", param.detach().cpu().numpy().copy())
+        # raise Exception()
+    print(f'Loss: {loss.item()} ')
+    
+    model.eval()  # Переводим модель в режим оценки (выключается Dropout/BatchNorm)
+    correct = 0
+    total = 0
+    for x_batch, y_batch in tqdm(train_loader):
+        x_batch, y_batch = x_batch.to(DEVICE), y_batch.to(DEVICE)
+        
+        with torch.no_grad():  # Отключаем автоматическое вычисление градиентов
+            output = model(x_batch)  # Предсказания модели
+            _, predicted = torch.max(output, 1)
+            correct += (predicted == y_batch).sum().item()  # Считаем количество правильных предсказаний
+            total += y_batch.size(0)  # Считаем общее количество примеров
+
+    # Рассчитываем итоговые метрики
+    accuracy = correct / total  # Точность (accuracy)
+    
+    print(f"Accuracy: {accuracy:.4f}")
+    
 # Сохраняем веса модели
 checkpoint_path = os.path.join(CHECKPOINT_DIR, f"model.pth")
 torch.save(model.state_dict(), checkpoint_path)
