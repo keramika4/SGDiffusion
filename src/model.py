@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import math
+from .periodic import PeriodicEmbeddings
 
 class CNN(nn.Module):
     def __init__(self, k=1):
@@ -77,19 +78,23 @@ class MLP(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten input
         return self.network(x)
 
+# class PeriodicEmbeddings(nn.Module):
+#     def __init__(self, d_in, d_embedding, n_frequencies=16, max_frequency=10.0):
+#         super().__init__()
+#         self.d_in = d_in
+#         self.n_frequencies = n_frequencies
 
-class PeriodicEmbeddings(nn.Module):
-    def __init__(self, d_in, d_embedding, n_frequencies=16, frequency_init_scale=1.0):
-        super().__init__()
-        self.frequencies = nn.Parameter(
-            frequency_init_scale * torch.randn(d_in, n_frequencies)
-        )
-        self.linear = nn.Linear(d_in * 2 * n_frequencies, d_embedding)
+#         freq_bands = torch.linspace(1.0, max_frequency, n_frequencies)
+#         self.register_buffer('frequencies', freq_bands[None, :].repeat(d_in, 1))
 
-    def forward(self, x):
-        x_proj = 2 * math.pi * x.unsqueeze(-1) * self.frequencies
-        x_pe = torch.cat([x_proj.sin(), x_proj.cos()], dim=-1)
-        return self.linear(x_pe.view(x.size(0), -1))
+#         self.norm = nn.LayerNorm(d_in)
+#         self.linear = nn.Linear(d_in * 2 * n_frequencies, d_embedding)
+
+#     def forward(self, x):
+#         x = self.norm(x)
+#         x_proj = 2 * math.pi * x.unsqueeze(-1) * self.frequencies
+#         x_pe = torch.cat([x_proj.sin(), x_proj.cos()], dim=-1)
+#         return self.linear(x_pe.view(x.size(0), -1))
 
 
 def make_mlp(in_dim, out_dim, hidden_dim, num_layers, activation='ReLU', dropout=0.0):
@@ -119,12 +124,13 @@ class MLP_PLR(nn.Module):
 
         if embedding_type == 'periodic':
             self.embedding = PeriodicEmbeddings(
-                d_in=input_size,
+                n_features=input_size,
                 d_embedding=d_embedding,
                 n_frequencies=n_frequencies,
                 frequency_init_scale=frequency_init_scale,
+                lite= True
             )
-            embedding_out_dim = d_embedding
+            embedding_out_dim = input_size * d_embedding 
         elif embedding_type == 'none':
             self.embedding = nn.Identity()
             embedding_out_dim = input_size
@@ -143,6 +149,7 @@ class MLP_PLR(nn.Module):
     def forward(self, x):
         x = x.view(x.size(0), -1)
         x = self.embedding(x)
+        x = x.view(x.size(0), -1)
         return self.network(x)
 
 
