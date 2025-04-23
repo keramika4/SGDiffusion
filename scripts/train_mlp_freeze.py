@@ -8,27 +8,27 @@ from tqdm import tqdm
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_root)
 
-from src.utils import MNIST, train, LOGGER
+from src.utils import MNIST, LOGGER
 from src.model import MLP_PLR
-
 import torch.nn as nn
 
-DEVICE = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
+DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 
-# Пути
-CHECKPOINT_DIR = "data/checkpoints/exp_mlp_plr"
-CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "model.pth")
-LOG_PATH = os.path.join(CHECKPOINT_DIR, "MLP_PLR_finetune_log_L2")
+CHECKPOINT_DIR = "data/checkpoints/finetune_embedding_and_linear_frozen"
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-# Гиперпараметры
 num_epochs = 10
 learning_rate = 0.001
 batch_size = 64
 
-# Датасеты
 train_dataset, test_dataset, train_loader, test_loader = MNIST(batch_size=batch_size)
 
-# Инициализация модели и загрузка весов
+seed = 100
+print(f"\nRunning training with seed {seed} ")
+torch.manual_seed(seed)
+np.random.seed(seed)
+random.seed(seed)
+
 model = MLP_PLR(
     input_size=28*28,
     num_classes=10,
@@ -42,23 +42,22 @@ model = MLP_PLR(
     dropout=0.0,
 ).to(DEVICE)
 
-model.load_state_dict(torch.load(CHECKPOINT_PATH,  weights_only=False))
-model.eval()
+# Заморозка указанных параметров
+freeze_names = [
+    "embedding.periodic.weight",
+    "embedding.linear.weight",
+    "embedding.linear.bias"
+]
 
-# Замораживаем все параметры, кроме embedding.periodic.weight
 for name, param in model.named_parameters():
-    param.requires_grad = ('embedding.periodic.weight' in name)
+    param.requires_grad = all(f not in name for f in freeze_names)
 
-# Оптимизатор только для разблокированных параметров
-trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-optimizer = torch.optim.Adam(trainable_params, lr=learning_rate, weight_decay=1e-4)
+optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate)
 criterion = nn.CrossEntropyLoss()
 
-# Логгер
 LOGGER.reset()
 LOGGER.set_tick_step(1)
 
-# Дообучение
 for epoch in range(num_epochs):
     model.train()
     for x_batch, y_batch in tqdm(train_loader):
@@ -74,11 +73,15 @@ for epoch in range(num_epochs):
 
         with torch.no_grad():
             for name, param in model.named_parameters():
-                if 'embedding.periodic.weight' in name:
+                if param.requires_grad:
                     LOGGER.update(name, param.detach().cpu().numpy().copy())
 
-    print(f"Epoch {epoch + 1}/{num_epochs} | Loss: {loss.item():.4f}")
+    print(f"Epoch {epoch+1}: Loss = {loss.item():.4f}")
 
-# Сохранение логов
-LOGGER.save(LOG_PATH)
-print(f"Finetune logs saved at {LOG_PATH}")
+checkpoint_path = os.path.join(CHECKPOINT_DIR, f"model.pth")
+torch.save(model.state_dict(), checkpoint_path)
+print(f"Model saved at {checkpoint_path}")
+
+log_path = os.path.join(CHECKPOINT_DIR, f"log")
+LOGGER.save(log_path)
+print(f"Logs saved at {log_path}")
