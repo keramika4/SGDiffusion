@@ -97,6 +97,21 @@ class MLP(nn.Module):
 #         return self.linear(x_pe.view(x.size(0), -1))
 
 
+
+def extract_patches(imgs, patch_size=4):
+    # imgs: (B, 1, 28, 28)
+    unfold = nn.Unfold(kernel_size=patch_size, stride=patch_size)
+    patches = unfold(imgs)  # (B, patch_size^2, num_patches)
+    return patches.permute(0, 2, 1)  # (B, num_patches, patch_dim)
+
+def get_patch_coordinates(grid_size=7, device='cpu'):
+    coords = torch.stack(torch.meshgrid(
+        torch.linspace(0, 1, grid_size, device=device),
+        torch.linspace(0, 1, grid_size, device=device),
+        indexing='ij'
+    ), dim=-1)  # (grid, grid, 2)
+    return coords.view(-1, 2)  # (num_patches, 2)
+
 def make_mlp(in_dim, out_dim, hidden_dim, num_layers, activation='ReLU', dropout=0.0):
     act_layer = getattr(nn, activation)
     layers = [nn.Linear(in_dim, hidden_dim), act_layer(), nn.Dropout(dropout)]
@@ -193,3 +208,59 @@ class CNNLayerNorm(nn.Module):
         x = self.fc2(x)
         x = self.ln3(x)
         return x
+
+
+class MLP_PLR_with_patches(nn.Module):
+    def __init__(
+        self,
+        patch_size=4,
+        num_classes=10,
+        embedding_type='periodic',
+        d_embedding=16,
+        n_frequencies=8,
+        frequency_init_scale=1.0,
+        activation='ReLU',
+        dropout=0.0,
+        hidden_dim=16,
+        num_layers=2,
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.grid_size = 28 // patch_size
+        self.num_patches = self.grid_size ** 2
+        self.patch_dim = patch_size ** 2
+
+        if embedding_type == 'periodic':
+            self.embedding = PeriodicEmbeddings(
+                n_features=self.patch_dim,
+                d_embedding=d_embedding,
+                n_frequencies=n_frequencies,
+                frequency_init_scale=frequency_init_scale,
+                lite= True
+            )
+            self.embedding_out_dim = self.patch_dim * d_embedding
+        elif embedding_type == 'none':
+            self.embedding = nn.Identity()
+            self.embedding_out_dim = self.patch_dim
+        else:
+            raise ValueError(f"Unknown embedding_type: {embedding_type}")
+
+        mlp_input_dim = self.num_patches * self.embedding_out_dim
+
+        self.network = make_mlp(
+            in_dim=mlp_input_dim,
+            out_dim=num_classes,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            activation=activation,
+            dropout=dropout,
+        )
+
+    def forward(self, x):  # x: (B, 1, 28, 28)
+        patches = extract_patches(x, patch_size=self.patch_size)  # (B, num_patches, patch_dim)
+        # print(patches.shape)
+        embeddings = self.embedding(patches)  # (B, num_patches, patch_dim, d_embedded) or (B, num_patches, patch_dim) if emb = none 
+        # print(embeddings.shape)
+        flat = embeddings.reshape(x.shape[0], -1)  # (B, num_patches * d_embedded)
+        # print(flat.shape)
+        return self.network(flat)

@@ -40,6 +40,8 @@ model = MLP_PLR(
     dropout=0.0,
 ).to(DEVICE)
 
+print('Count parameters : ', sum(p.numel() for p in model.parameters() ))
+
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.CrossEntropyLoss()
 

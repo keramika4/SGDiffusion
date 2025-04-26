@@ -1,0 +1,101 @@
+import torch
+import os
+import sys
+import random
+import numpy as np
+from tqdm import tqdm
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(project_root)
+
+from src.utils import MNIST, train, total_variation_loss_model, LOGGER
+from src.model import MLP_PLR, MLP_PLR_with_patches
+
+import torch.nn as nn
+
+DEVICE = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# Папка для сохранения чекпоинтов и логов
+CHECKPOINT_DIR = "data/checkpoints/exp_mlp_plr_patches"
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+# Гиперпараметры
+num_epochs = 10
+learning_rate = 0.01
+batch_size = 64
+
+train_dataset, test_dataset, train_loader, test_loader = MNIST(batch_size=batch_size)
+
+seed = 100
+print(f"\nRunning training with seed {seed} ")
+torch.manual_seed(seed)
+np.random.seed(seed)
+random.seed(seed)
+
+# Инициализация модели
+model = MLP_PLR_with_patches(
+    patch_size= 4,
+    num_classes=10,
+    hidden_dim=256,
+    num_layers=2,
+    embedding_type='none',
+    activation='ReLU',
+    dropout=0.0,
+).to(DEVICE)
+
+
+print('Count parameters : ', sum(p.numel() for p in model.parameters() ))
+
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+criterion = nn.CrossEntropyLoss()
+
+LOGGER.reset()
+LOGGER.set_tick_step(1)
+
+for epoch in range(num_epochs):
+    model.train()
+    for x_batch, y_batch in tqdm(train_loader):
+        x_batch, y_batch = x_batch.to(DEVICE), y_batch.to(DEVICE)
+
+        optimizer.zero_grad()
+        output = model(x_batch)
+        loss = criterion(output, y_batch)
+        loss.backward()
+        optimizer.step()
+
+        LOGGER.update("loss", loss.item())
+
+        # Логгирование весов PeriodicEmbeddings после каждого шага
+        with torch.no_grad():
+
+            for name, param in model.named_parameters():
+                if 'embedding' in name:
+                    LOGGER.update(f"{name}", param.detach().cpu().numpy().copy())
+        # raise Exception()
+    print(f'Loss: {loss.item()} ')
+    
+    model.eval()  # Переводим модель в режим оценки (выключается Dropout/BatchNorm)
+    correct = 0
+    total = 0
+    for x_batch, y_batch in tqdm(train_loader):
+        x_batch, y_batch = x_batch.to(DEVICE), y_batch.to(DEVICE)
+        
+        with torch.no_grad():  # Отключаем автоматическое вычисление градиентов
+            output = model(x_batch)  # Предсказания модели
+            _, predicted = torch.max(output, 1)
+            correct += (predicted == y_batch).sum().item()  # Считаем количество правильных предсказаний
+            total += y_batch.size(0)  # Считаем общее количество примеров
+
+    # Рассчитываем итоговые метрики
+    accuracy = correct / total  # Точность (accuracy)
+    
+    print(f"Accuracy: {accuracy:.4f}")
+    
+# Сохраняем веса модели
+checkpoint_path = os.path.join(CHECKPOINT_DIR, f"model.pth")
+torch.save(model.state_dict(), checkpoint_path)
+print(f"Model saved at {checkpoint_path}")
+
+log_path = os.path.join(CHECKPOINT_DIR, f"MLP_PLR_log")
+LOGGER.save(log_path)
+print(f"Logs saved at {log_path}")
